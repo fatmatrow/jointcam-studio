@@ -1,11 +1,16 @@
-JointCam Studio — Standalone 1.2.0 for Windows x64
+JointCam Studio — Standalone 1.3.0 for Windows x64
 
 Installing
-Run JointCam-Studio-1.2.0-Setup.exe. It installs for your Windows account only, with no administrator prompt, into %LOCALAPPDATA%\Programs\JointCam Studio Standalone, and adds JointCam Studio to the Start menu (and optionally the desktop). Everything it needs is inside: no Python, Qt or Visual C++ download is required. Windows 10 (1809 or later) or Windows 11, 64-bit.
+Run JointCam-Studio-1.3.0-Setup.exe. It installs for your Windows account only, with no administrator prompt, into %LOCALAPPDATA%\Programs\JointCam Studio Standalone, and adds JointCam Studio to the Start menu (and optionally the desktop). Everything it needs is inside: no Python, Qt or Visual C++ download is required. Windows 10 (1809 or later) or Windows 11, 64-bit.
 Because the setup file is not code-signed, Windows SmartScreen may show "Windows protected your PC". Click More info, then Run anyway.
 It installs separately from any earlier JointCam Studio, which you can keep or remove. Both share the same saved settings.
 To update, run a newer setup over the top. To remove it, use Settings > Apps > Installed apps > JointCam Studio > Uninstall. Your settings are kept in case you reinstall.
 For NVIDIA RTX face tracking, install NVIDIA's AR SDK runtime for your GPU. Without it JointCam uses its built-in CPU face tracker automatically.
+
+What's new in 1.3.0
+More of your upper lip, mustache still hidden. The live mouth now reaches above the outer lip line and shows your full upper lip and the bare skin above it. Each column of the mouth stops where facial hair begins: hair that is clearly darker than your lips, or much greyer than them, is left out, and the edge blends softly into the avatar. Stage controls > Avatar > Upper lip reach sets how far it may reach: 100% is the default, higher shows more, 0% shows only the lips as in earlier versions. If a light blond mustache shows through, lower the reach.
+Add-ons during setup. The setup's components page can download and install what JointCam uses from outside its own folder: the OBS Spout2 plugin, NVIDIA's AR SDK runtime for your GPU generation (RTX face tracking), and OBS Studio if it is missing. Each comes from its official source and is checked before it runs: GitHub downloads against GitHub's published SHA-256 fingerprint, NVIDIA's installer against NVIDIA's code signature. Anything already installed is skipped, and Windows asks for administrator approval for each one. Run "JointCam Studio add-ons" from the Start menu to check or install them again later. JointCam's own Spout2 sender is built in and needs no download.
+Smaller, faster-starting app. The installer is now one file under 100 MB. MediaPipe no longer loads its unused plotting library at startup, the camera library uses OpenCV's standard build, and Qt's software OpenGL copy is gone (JointCam's own compatibility renderer covers PCs without OpenGL).
 
 What's new in 1.2.0
 Steadier mouth and eyes. The live eye and lip tiles no longer wobble, zoom or rotate with tracking noise: each tile's framing is smoothed while you hold still and follows instantly when you move, and it always keeps your lips fully inside the tile. The lip outline still comes from the current frame, so it matches your mouth exactly.

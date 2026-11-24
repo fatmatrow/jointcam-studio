@@ -99,14 +99,72 @@ class FaceMeasure:
         self.span = OneEuro(.8, 2.0)
         self.opening = OneEuro(3.0, 1.5)
         self.lip_height = None
+        self.lip_reach = None
         self.baseline = None
         self.yaw_ref = self.pitch_ref = self.ear_ref = None
         self.sharp_ref = [None, None]
 
+    def upper_lip(self, rgb_tile, lip, lips, reach, dt):
+        """Alpha for the skin and lip just above the outer lip line, stopping at facial hair.
+
+        Each column scans up from the lip line to `reach` tile pixels (tapered towards the
+        corners) and stops at the first pixel that reads as hair: clearly darker than this
+        person's lips (dark hair) or much greyer than them (grey or white hair). The reach of
+        each column retracts at once when hair comes closer and grows back smoothly.
+        """
+        upper = lip[:7]
+        order = np.argsort(upper[:, 0])
+        ux, uy = upper[order, 0], upper[order, 1]
+        x0, x1 = int(math.ceil(ux[0])), int(math.floor(ux[-1]))
+        if x1-x0 < 8 or not np.any(lips):
+            return None
+        H, W = rgb_tile.shape[:2]
+        x0, x1 = max(0, x0), min(W-1, x1)
+        xs = np.arange(x0, x1+1)
+        y0 = np.interp(xs, ux, uy)
+        half = max(1., (ux[-1]-ux[0])*.5)
+        t = np.clip((xs-(ux[0]+ux[-1])*.5)/half, -1, 1)
+        limit = y0-reach*np.clip(1-t*t, 0, 1)**.6
+        lab = cv2.cvtColor(np.ascontiguousarray(rgb_tile), cv2.COLOR_RGB2LAB).astype(np.float32)
+        L = lab[:, :, 0]
+        C = np.hypot(lab[:, :, 1]-128, lab[:, :, 2]-128)
+        lip_l = float(np.median(L[lips]))
+        lip_c = max(8., float(np.median(C[lips])))
+        dark = np.clip((lip_l-18-L)/25, 0, 1)
+        grey = np.clip((.5*lip_c-C)/(.25*lip_c), 0, 1)
+        # Wide horizontal smoothing makes a sparse fringe of hairs count as hair.
+        hair = cv2.blur(np.maximum(dark, grey), (7, 3))[:, xs]
+        rows = np.arange(H, dtype=np.float32)[:, None]
+        hit = (rows < y0[None, :]) & (rows >= limit[None, :]) & (hair > .4)
+        nearest = H-1-np.argmax(hit[::-1], axis=0)
+        top = np.where(hit.any(axis=0), nearest+1., np.maximum(limit, 0.))
+        extent = np.clip(y0-top, 0, None)/max(reach, 1e-3)
+        # No column reaches higher than its neighbours allow, so hair cannot show through
+        # a gap between strands that one column happened to slip through.
+        if len(extent) >= 7:
+            extent = np.lib.stride_tricks.sliding_window_view(np.pad(extent, 3, mode="edge"), 7).min(axis=1)
+        slots = np.interp(np.linspace(-1, 1, 32), t, extent)
+        if self.lip_reach is None or not 0 < dt < .25:
+            self.lip_reach = slots
+        else:
+            grow = slots > self.lip_reach
+            self.lip_reach = np.where(grow, self.lip_reach+(slots-self.lip_reach)*(1-math.exp(-dt/.15)), slots)
+        extent = np.interp(t, np.linspace(-1, 1, 32), self.lip_reach)*reach
+        extent = np.convolve(np.pad(extent, 2, mode="edge"), np.ones(5)/5, mode="valid")
+        top = y0-extent
+        # Overlap into the lip so the two soft edges leave no see-through seam.
+        # Everything inside the outer lip line is visible anyway, so a deep overlap is free.
+        bottom = y0+4*SCALE
+        polygon = np.concatenate([np.stack([xs, top], 1), np.stack([xs[::-1], bottom[::-1]], 1)])
+        alpha = np.zeros((H, W), np.uint8)
+        cv2.fillPoly(alpha, [np.int32(np.round(polygon*16))], 255, lineType=cv2.LINE_AA, shift=4)
+        # A softer top edge blends the lip into the avatar without a visible line.
+        return cv2.GaussianBlur(alpha, (0, 0), sigmaX=.65*SCALE, sigmaY=1.5*SCALE)
+
     def _ema(self, ref, value, dt, tau=3.):
         return value if ref is None else ref+(value-ref)*(1-math.exp(-min(dt, .25)/tau))
 
-    def __call__(self, rgb, landmarks, stamp, matte=False, sensor=None):
+    def __call__(self, rgb, landmarks, stamp, matte=False, sensor=None, lip_reach=100):
         height, width = rgb.shape[:2]
         pts = np.empty((max(FACE_POINTS)+1, 2), np.float32)
         for i in FACE_POINTS:
@@ -155,14 +213,17 @@ class FaceMeasure:
                 center = center+unit*shift+vertical*vshift
                 self.crops[i].value[:2] = center
             if i == 2:
-                # The current lips must fit the steady crop: size the tile around them.
+                # The current lips must fit the steady crop: size the tile around them, with
+                # room above the upper lip for the upper-lip reach. The room is added on both
+                # sides so the lips stay centred in the tile and on the avatar.
                 offsets = (contour-center)@vertical
-                needed = max(span*.20, 2*float(np.abs(offsets).max()))*1.12
+                reach_img = max(0., lip_reach)/100*.12*span
+                needed = max(span*.20, 2*max(float(offsets.max()), reach_img-float(offsets.min())))*1.12
                 if self.lip_height is None or dt <= 0 or dt >= .25 or needed > self.lip_height:
                     self.lip_height = needed
                 else:
                     self.lip_height += (needed-self.lip_height)*(1-math.exp(-dt/.12))
-                height_px = min(max(self.lip_height, needed), width_px*.85)
+                height_px = min(max(self.lip_height, needed), width_px*.95)
             matrix = cv2.getAffineTransform(np.float32([center, center+unit*width_px/2, center+vertical*height_px/2]),
                                             np.float32([[48*S, 32*S], [96*S, 32*S], [48*S, 64*S]]))
             tile = patch[:, TILE_W*i:TILE_W*(i+1)]
@@ -187,11 +248,15 @@ class FaceMeasure:
                 lip = cv2.transform(contour[None], matrix)[0]
                 mask = np.zeros((TILE_H, TILE_W), np.uint8)
                 cv2.fillPoly(mask, [np.int32(np.round(lip*16))], 255, lineType=cv2.LINE_AA, shift=4)
+                inside = cv2.transform(pts[[78, 81, 13, 311, 308, 402, 14, 178]][None], matrix)[0]
+                tissue = mask.copy()
+                cv2.fillPoly(tissue, [np.int32(np.round(inside*16))], 0, lineType=cv2.LINE_AA, shift=4)
+                selected = tissue > 180
+                upper = None
+                if lip_reach > 0:
+                    reach_tile = max(0., lip_reach)/100*.12*span*(64*S/height_px)
+                    upper = self.upper_lip(rgb_tile, lip, selected, reach_tile, dt)
                 if matte:
-                    inside = cv2.transform(pts[[78, 81, 13, 311, 308, 402, 14, 178]][None], matrix)[0]
-                    tissue = mask.copy()
-                    cv2.fillPoly(tissue, [np.int32(np.round(inside*16))], 0, lineType=cv2.LINE_AA, shift=4)
-                    selected = tissue > 180
                     if np.any(selected):
                         pixels = rgb_tile[selected]
                         # Every other lip pixel gives the same median tone at half the sort cost.
@@ -200,8 +265,9 @@ class FaceMeasure:
                         tint = level[:, :, None]*(tone*.91+tone.mean()*.09)
                         blended = cv2.addWeighted(rgb_tile.astype(np.float32), .30, tint, .70, 0)
                         np.copyto(tile[:, :, :3], np.clip(blended, 0, 255).astype(np.uint8), where=selected[:, :, None])
-                tile[:, :, 3] = cv2.GaussianBlur(mask, (2*S+1, 2*S+1), .65*S)
-                aspect = float(np.clip(height_px/width_px, .16, .85))
+                alpha = cv2.GaussianBlur(mask, (2*S+1, 2*S+1), .65*S)
+                tile[:, :, 3] = alpha if upper is None else np.maximum(alpha, upper)
+                aspect = float(np.clip(height_px/width_px, .16, .95))
         mid = (l+r)*.5
         yaw = float(np.clip((pts[1, 0]-mid[0])/eye_span_raw*2, -.9, .9))
         pitch = float(np.clip(((pts[1, 1]-mid[1])/eye_span_raw-.46)*1.25, -.5, .5))
@@ -527,7 +593,8 @@ def face_loop(shared, stop, cfg, rig):
                     result = face.process(rgb)
                     landmarks = result.multi_face_landmarks[0].landmark if result.multi_face_landmarks else None
                 # Tiles come from the full-resolution frame for every camera.
-                data = measurer(rgb, landmarks, stamp, live.get("matte", cfg.get("matte", False)), raw) if landmarks else None
+                data = measurer(rgb, landmarks, stamp, live.get("matte", cfg.get("matte", False)), raw,
+                                live.get("lipReach", cfg.get("lipReach", 100))) if landmarks else None
                 if landmarks:
                     mouth = {"x": (landmarks[13].x+landmarks[14].x)/2, "y": (landmarks[13].y+landmarks[14].y)/2,
                              "span": abs(landmarks[33].x-landmarks[263].x)}

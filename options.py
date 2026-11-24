@@ -11,7 +11,7 @@ FLAGS={"ninjas":"Ninja fight overlay","faceOnly":"Low memory · face tracking on
        "closeup":"Streamer close-up","backdrop":"Studio backdrop"}
 RANGES={"smoothing":("Motion smoothing",0,100,65),"armStability":("Arm stability",0,100,65),"gain":("Motion sensitivity",0,170,100),"centerX":("Fixed face center X",10,90,50),
         "eyeY":("Fixed eyes Y",5,90,40),"mouthY":("Fixed mouth Y",10,95,58),"spacing":("Fixed eye spacing",3,35,12),
-        "sensitivity":("Audio sensitivity",25,200,100)}
+        "sensitivity":("Audio sensitivity",25,200,100),"lipReach":("Upper lip reach",0,300,100)}
 EFFECTS=("Confetti","Ember sparks","Star shower")
 class Options(QDialog):
     def __init__(self,studio):
@@ -42,6 +42,9 @@ class Options(QDialog):
         f=page("Avatar")
         self.cfg["character"]=studio.avatar_group.checkedButton().property("character")
         for k in ["faceOnly","closeup","backdrop","matte"]:flag(f,k)
+        number(f,"lipReach")
+        self.box["lipReach"].setToolTip("How far the live mouth reaches above your upper lip. It stops at a mustache "
+                                        "automatically. Raise it to show more upper lip; 0% shows only the lips.")
         number(f,"gain")
         number(f,"smoothing")
         self.down_tilt=QSpinBox()
@@ -257,7 +260,7 @@ class Options(QDialog):
     def change(self,k,value):
         self.cfg[k]=value;self.host.settings.setValue("stage/"+k,value)
         self.sync()
-        if k in ("matte","centerX","eyeY","mouthY","spacing","faceOnly","arms","manual","ninjas","fullHands"):
+        if k in ("matte","lipReach","centerX","eyeY","mouthY","spacing","faceOnly","arms","manual","ninjas","fullHands"):
             self.host.cam.set_tracking_option(k,value)
         if k=="manual" and value and self.host.pending_center:
             self.host.pending_center=False

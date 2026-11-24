@@ -3,7 +3,7 @@ Building the JointCam Studio installer
 
     python installer/build_installer.py
 
-produces dist/JointCam-Studio-1.2.0-Setup.exe: one self-contained 64-bit setup file with the
+produces dist/JointCam-Studio-1.3.0-Setup.exe: one self-contained 64-bit setup file with the
 app, the official CPython 3.12.10 runtime (Python Software Foundation NuGet package), every
 Python package as a hash-pinned Windows wheel, and the native launcher.
 
@@ -21,6 +21,8 @@ Files
   requirements-windows.txt   pinned Windows wheels with SHA-256 hashes
   installer.nsi              NSIS script: per-user install, Start menu/desktop shortcuts,
                              Add/Remove Programs entry, exact-file uninstall
+  ../addons.py               installed with the app; the setup runs it to download the OBS Spout2 plugin,
+                             the NVIDIA AR SDK runtime and OBS Studio when selected and missing
   launcher/launcher.c        "JointCam Studio.exe": hosts Python in its own process, so the taskbar
                              and Task Manager show JointCam Studio with its icon. No C runtime.
   launcher/launcher.rc       icon, version information and manifest

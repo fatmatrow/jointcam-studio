@@ -31,7 +31,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 PYTHON_VERSION = "3.12.10"
 PYTHON_URL = f"https://api.nuget.org/v3-flatcontainer/python/{PYTHON_VERSION}/python.{PYTHON_VERSION}.nupkg"
 PYTHON_SHA256 = "0eb85c2dfccccf1b17352de4c397f69194035b7d37149eacc16f1147d93de3b8"
@@ -52,7 +52,9 @@ APP_EXCLUDE_SUFFIX = (".pyc", ".zip", "-Code.txt", ".diff")
 # Qt modules the app imports. Everything else in PySide6 is unreachable.
 QT_MODULES = ("QtCore", "QtGui", "QtWidgets", "QtQml", "QtOpenGL", "QtOpenGLWidgets")
 QT_PLUGIN_DIRS = ("platforms", "styles", "imageformats", "iconengines", "generic", "platforminputcontexts")
-QT_DYNAMIC = {"opengl32sw.dll"}  # software OpenGL, loaded by name when the driver has no GL
+# Qt's 20 MB software OpenGL (opengl32sw.dll) is not shipped: without a working OpenGL driver
+# JointCam already falls back to its own compatibility renderer.
+QT_DYNAMIC = set()
 VC_RUNTIME = re.compile(r"^(msvcp140.*|vcruntime140.*|concrt140|vcomp140)\.dll$", re.I)
 
 
@@ -277,6 +279,23 @@ def prune_qt():
     log(f"  Qt: kept {len([k for k in local if k in needed])} libraries, removed {removed/1e6:.0f} MB")
 
 
+def lazy_matplotlib():
+    """MediaPipe imports matplotlib.pyplot at module level for one 3-D plotting helper that
+    JointCam never calls. Make that import lazy so matplotlib and its dependencies (about
+    50 MB) need not be bundled, and MediaPipe starts noticeably faster."""
+    path = SITE / "mediapipe" / "python" / "solutions" / "drawing_utils.py"
+    source = path.read_text(encoding="utf-8")
+    line = "import matplotlib.pyplot as plt\n"
+    if source.count(line) != 1:
+        raise SystemExit("MediaPipe's drawing_utils.py changed: review the lazy matplotlib patch.")
+    lazy = ("class _LazyPyplot:  # JointCam build: matplotlib loads only if plot_landmarks is called.\n"
+            "  def __getattr__(self, name):\n"
+            "    import matplotlib.pyplot as pyplot\n"
+            "    return getattr(pyplot, name)\n"
+            "plt = _LazyPyplot()\n")
+    path.write_text(source.replace(line, lazy), encoding="utf-8")
+
+
 def share_vc_runtime():
     """Give every module the newest Visual C++ runtime, even without the VC++ redistributable."""
     for source in (SITE / "PySide6").glob("*.dll"):
@@ -396,6 +415,7 @@ def main():
     stage_python(package)
     stage_wheels(wheels)
     prune_qt()
+    lazy_matplotlib()
     share_vc_runtime()
     check_dependencies()
     precompile()

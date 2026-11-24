@@ -4,7 +4,7 @@ pushd "%~dp0" || exit /b 1
 set "diagdir=%LOCALAPPDATA%\JointCam Studio"
 if not exist "%diagdir%" mkdir "%diagdir%"
 set "report=%diagdir%\loader-report.txt"
-> "%report%" echo JointCam Studio 1.2.0 Windows loader check
+> "%report%" echo JointCam Studio 1.3.0 Windows loader check
 >> "%report%" ver
 call :probe "Python runtime" "import sys; print(sys.version)"
 if errorlevel 1 goto done

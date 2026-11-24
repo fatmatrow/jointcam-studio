@@ -79,7 +79,7 @@ class Studio(QMainWindow):
     benchmark_done=Signal(object,str)
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("JointCam Studio • 1.2.0")
+        self.setWindowTitle("JointCam Studio • 1.3.0")
         self.resize(1100,635)
         self.settings=QSettings("JointCam","Standalone Studio")
         self.fps = 60 if str(self.settings.value("video/fps",30))=="60" else 30
@@ -431,7 +431,7 @@ class Studio(QMainWindow):
                     self.backend.blockSignals(previous)
                 from software import SoftwareRenderer
                 self.render=SoftwareRenderer(*dimensions(self.output_mode))
-                self.setWindowTitle("JointCam Studio 1.2.0 • Compatibility renderer")
+                self.setWindowTitle("JointCam Studio 1.3.0 • Compatibility renderer")
             self.set_live_preview(self.preview_switch.isChecked())
             self.deadline=time.monotonic()
             self.timer.start(0)
@@ -629,7 +629,7 @@ class Studio(QMainWindow):
 
     def help_obs(self):
         if self.backend.currentData()=="spout":
-            QMessageBox.information(self,"Spout2 output","Install the Spout2 Capture plugin for OBS and restart OBS. Click Start output here. In OBS, add a Spout2 Capture source and choose JointCam Studio. Use the premultiplied alpha composite mode if available. Both apps should run on the same GPU.")
+            QMessageBox.information(self,"Spout2 output","Install the Spout2 Capture plugin for OBS (the JointCam setup offers it, or run JointCam Studio add-ons from the Start menu) and restart OBS. Click Start output here. In OBS, add a Spout2 Capture source and choose JointCam Studio. Use the premultiplied alpha composite mode if available. Both apps should run on the same GPU.")
             return
         alpha=self.backend.currentData()=="unitycapture"
         instructions=("Install Unity Capture and choose Unity Video Capture with ARGB video format in OBS. "

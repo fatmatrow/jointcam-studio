@@ -21,7 +21,7 @@ OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\Programs\${APPNAME} Standalone"
 InstallDirRegKey HKCU "${UNINSTALL_KEY}" "InstallLocation"
 BrandingText "${APPNAME} ${VERSION}"
-ShowInstDetails nevershow
+ShowInstDetails show
 ShowUninstDetails nevershow
 
 VIProductVersion "${VERSION}.0"
@@ -44,7 +44,9 @@ VIAddVersionKey "LegalCopyright" "${APPNAME}"
 !define MUI_FINISHPAGE_LINK "Open the Quick-start guide"
 !define MUI_FINISHPAGE_LINK_LOCATION "$INSTDIR\Quick-start.txt"
 
+!define MUI_COMPONENTSPAGE_SMALLDESC
 !insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
@@ -74,7 +76,8 @@ FunctionEnd
   ${Loop}
 !macroend
 
-Section "Install"
+Section "JointCam Studio" SecApp
+  SectionIn RO
   SetShellVarContext current
   !insertmacro WaitForAppToClose
   ; Replace the previous version's runtime completely so no stale package files remain.
@@ -85,6 +88,7 @@ Section "Install"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   CreateShortcut "$SMPROGRAMS\${APPNAME}.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\${EXE}" 0
+  CreateShortcut "$SMPROGRAMS\${APPNAME} add-ons.lnk" "$INSTDIR\runtime\python.exe" '"$INSTDIR\addons.py" --all --pause' "$INSTDIR\${EXE}" 0
   ${If} ${Silent}
     Call DesktopShortcut
   ${EndIf}
@@ -101,10 +105,51 @@ Section "Install"
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
 SectionEnd
 
+; Components fetched from their official sources while installing (see addons.py). Each one is
+; skipped when already present, and each one's own installer asks for administrator rights.
+SectionGroup /e "Download and install add-ons" SecAddons
+  Section "OBS Studio (only if not installed)" SecObs
+  SectionEnd
+  Section "OBS Spout2 plugin" SecSpout
+  SectionEnd
+  Section "NVIDIA AR SDK runtime" SecNvidia
+  SectionEnd
+SectionGroupEnd
+
+Section "-Run add-ons"
+  ${If} ${Silent}
+    Return
+  ${EndIf}
+  StrCpy $1 ""
+  ${If} ${SectionIsSelected} ${SecObs}
+    StrCpy $1 "$1 --obs"
+  ${EndIf}
+  ${If} ${SectionIsSelected} ${SecSpout}
+    StrCpy $1 "$1 --spout"
+  ${EndIf}
+  ${If} ${SectionIsSelected} ${SecNvidia}
+    StrCpy $1 "$1 --nvidia"
+  ${EndIf}
+  ${If} $1 != ""
+    DetailPrint "Checking and installing add-ons. This needs an internet connection."
+    nsExec::ExecToLog '"$INSTDIR\runtime\python.exe" -u "$INSTDIR\addons.py"$1'
+    Pop $0
+  ${EndIf}
+SectionEnd
+
+!insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecApp} "The app with everything it needs to run: Python, Qt, OpenCV, MediaPipe and the Visual C++ runtime are included."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecAddons} "Downloaded from their official sources and checked before they run. Already-installed components are skipped. Windows asks for administrator approval for each one."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecObs} "The streaming app JointCam sends to. Downloaded from the OBS Project's GitHub releases only if OBS is not installed."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecSpout} "Lets OBS receive JointCam's transparent GPU texture (Spout2 output). From Off-World Live's GitHub releases."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecNvidia} "NVIDIA RTX face tracking. The build for this PC's GPU generation, from NVIDIA, checked for NVIDIA's code signature. Skipped on PCs without an RTX GPU."
+!insertmacro MUI_FUNCTION_DESCRIPTION_END
+
 Section "Uninstall"
   SetShellVarContext current
   !insertmacro WaitForAppToClose
   Delete "$SMPROGRAMS\${APPNAME}.lnk"
+  Delete "$SMPROGRAMS\${APPNAME} add-ons.lnk"
   Delete "$DESKTOP\${APPNAME}.lnk"
   ; Remove only what the installer put here, then the folder if it is empty.
   !include "${UNINSTALL_LIST}"

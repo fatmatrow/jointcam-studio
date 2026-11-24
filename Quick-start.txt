@@ -1,0 +1,86 @@
+JointCam Studio — Standalone 1.1.0 for Windows x64
+
+Installing
+Run JointCam-Studio-1.1.0-Setup.exe. It installs for your Windows account only, with no administrator prompt, into %LOCALAPPDATA%\Programs\JointCam Studio Standalone, and adds JointCam Studio to the Start menu (and optionally the desktop). Everything it needs is inside: no Python, Qt or Visual C++ download is required. Windows 10 (1809 or later) or Windows 11, 64-bit.
+Because the setup file is not code-signed, Windows SmartScreen may show "Windows protected your PC". Click More info, then Run anyway.
+It installs separately from any earlier JointCam Studio, which you can keep or remove. Both share the same saved settings.
+To update, run a newer setup over the top. To remove it, use Settings > Apps > Installed apps > JointCam Studio > Uninstall. Your settings are kept in case you reinstall.
+For NVIDIA RTX face tracking, install NVIDIA's AR SDK runtime for your GPU. Without it JointCam uses its built-in CPU face tracker automatically.
+
+What's new in 1.1.0
+Rendering quality. Open Stage controls > Performance and choose Rendering quality. Efficient uses 4× multisampling. High uses 8× multisampling. Cinema (the default) adds 1.5× supersampling: the stage renders above the output resolution and a Lanczos filter brings it down, which removes shimmer from the ash, paper grain, glasses and overlay edges. Ultra uses 2× supersampling. High, Cinema and Ultra add a warm glow around The Joint's burning ember when the output is transparent (Spout2 or Unity Capture) or uses the studio backdrop. The green OBS Virtual Camera feed never gets glow, so chroma keying stays clean, and glow pauses during an OBS frame-age measurement. Cinema is light work for an RTX 4070. If a game is GPU-bound while you stream, step down to High.
+Sharper live face. Eye and lip tiles are now 192 × 128 (four times the pixels of 1.0) and are sampled from the full camera frame for every webcam, not only the Kiyo Pro profile.
+Faster tracking. Face, body and hand models now run on separate CPU threads. Face updates no longer wait behind the pose and hand models, so lips and eyes follow every camera frame with less delay. Hand landmarks use a larger frame for steadier fingers.
+Leaner OBS Virtual Camera output. Frames are converted to NV12 on the GPU, so half as much data comes back from the graphics card and the CPU skips a colour conversion. Colours match 1.0. Spout2 sends the finished GPU texture with no readback at all.
+Camera stream format. Stage controls > Camera & video > Camera stream format. Automatic requests MJPEG for HD or 60 FPS capture, which most USB webcams need to reach 1080p60, and the driver's default otherwise. The Actual camera input line shows the format the driver delivered.
+Smoother pacing during games. JointCam asks Windows for 1 ms timer resolution, opts out of Windows 11 efficiency mode (which otherwise slows minimized or covered windows) and runs at above-normal priority. The camera and face threads register with the Windows multimedia scheduler. The preview no longer waits for monitor vsync, so the output clock is never held by the preview window.
+CPU placement. On Ryzen processors with two CPU dies (such as the Ryzen 9 5950X), Keep JointCam on the second CPU die is on by default. Games run on the first die. Keeping the tracker and renderer on the other die stops them from competing for the game's L3 cache. Turn it off under Stage controls > Performance if you prefer Windows to place JointCam freely.
+
+Suggested settings for a Ryzen 9 5950X with an RTX 4070: Rendering quality Cinema, Output 1920 × 1080 at 60 FPS, Spout2 output, Camera stream format Automatic, Keep JointCam on the second CPU die on. In OBS use an NVIDIA NVENC encoder.
+
+Choose The Joint, Beaker Bong, Pocket Lighter or Scruffy Crack Pipe from the avatar buttons to the left of the preview. The bong, lighter and pipe have planted bases and bend with your head. A quick glance leads with the face. The lower trunk follows a sustained turn, lean or nod and settles when you straighten up. OpenGL renders their textured 3D bodies and live facial features. Compatibility mode uses bending artwork. The Scruffy Crack Pipe’s wiry mustache follows the upper edge of your live lips as you talk.
+
+Stage controls > Hands & props > Arm stability calms small arm and hand movements. Start at 65%. Use 0% for the RC5 response.
+
+Open JointCam Studio from the Start menu. The app opens a live animated preview. Its runtime, tracking models, and graphics components are included.
+
+Choose your webcam by name under Camera input. If another program has the webcam open, deactivate that physical camera source in OBS, then select Avatar only and reselect your webcam in JointCam. Refresh cameras after connecting a device. You can try the controls in Avatar only mode before connecting anything.
+
+Drag in the preview to position the character. Use Avatar size to zoom, and Reset framing to center it. Glasses, shoulder tracking and framing apply to preview and output. The app remembers appearance and output settings. At startup JointCam selects USB Video Device when available, preferring a confirmed Kiyo Pro among matching devices. A camera named Kiyo Pro is also recognized. If neither is present, the app starts in Avatar only mode. OBS output starts when you click Start output.
+
+To send the result, click Start output. Click Connect to OBS for setup instructions for the selected device. Keep JointCam open while streaming. Stop output disconnects the virtual camera and leaves the preview running. Unity Capture requires its own installed virtual camera driver. If OpenGL is unavailable, the title bar identifies compatibility mode, which renders a simplified 2D avatar.
+
+If startup fails, run the setup again to repair the installation. Startup details are in %LOCALAPPDATA%\JointCam Studio\startup.log. Diagnose-startup.cmd in the install folder checks each component and opens a report.
+
+Camera and output resolutions
+Open Stage controls > Camera & video. Choose Camera input resolution and Camera input frame rate, then click Apply video settings. Choose Device default for either setting to let the driver select it. Actual camera input shows the delivered dimensions and measured capture rate. The driver may substitute a supported combination.
+
+Output resolution and Output frame rate independently control JointCam's stage and OBS feed. For example, you can request 1920 × 1080 at 30 FPS from the webcam while sending 1280 × 720 at 60 FPS to OBS. The stage can animate between camera samples. Input changes reopen the webcam. Output-only changes keep the webcam running.
+
+For a Razer Kiyo Pro listed as USB Video Device, enable Use Kiyo Pro tracking profile. Its initial request is 1920 × 1080 at 60 FPS. The same input controls let you change either value. JointCam remembers separate selections for the Kiyo profile and general cameras. With automatic face tracking the eye and mouth tiles come directly from the captured frame. After changing camera position or field of view, click Calibrate camera position on the main screen, or press Ctrl+Alt+C.
+
+Windows camera settings opens the Cameras page on Windows 11. Choose your webcam there. Webcam driver controls requests the active DirectShow camera’s own controls, which vary by driver. On older Windows systems both buttons request the driver panel. Select a physical webcam first to use that panel.
+
+Spout2 and face tracking
+For transparent GPU output, select Spout2 · GPU texture and click Start output. Install the Windows x64 OBS Spout2 plugin from https://github.com/Off-World-Live/obs-spout2-plugin/releases and restart OBS. Add a Spout2 Capture source, choose JointCam Studio and select premultiplied alpha compositing if offered. Run both programs on the same graphics adapter. Stop output to change between Spout2, OBS Virtual Camera and Unity Capture. With an RTX 4070, select an NVIDIA NVENC encoder in OBS to use its hardware video encoder for the stream. JointCam supplies the rendered texture to OBS.
+
+The tracking indicator shows NVIDIA RTX when the NVIDIA AR facial-landmark runtime initializes, CPU fallback when the bundled Face Mesh tracker takes over, or Manual placement when fixed cutouts are active. On an RTX 4070 use NVIDIA's Windows AR facial-landmark runtime for Ada GPUs. Finger tracking starts when the enabled rig sees a wrist and releases the hand model after inactivity.
+
+Measure latency with the game focused
+1. Choose your physical webcam, enable tracking, and start the output you want to measure. In OBS, right-click the JointCam source and open a windowed source projector.
+2. Keep the projector fully visible, preferably on a second display. Select Measure OBS frame age, then select that projector. The test adds a small black-and-white timing strip to the outgoing video for 30 seconds. It will be visible to viewers if you are live.
+3. Return focus to the game and use the same scene, game settings and camera for each comparison. The strip carries the timestamp of the face actually displayed, including briefly held faces when tracking is interrupted. JointCam reads the displayed strip and reports median, 95th percentile and maximum age. A lower p95 indicates a fresher frame at the slow end. The clock starts when the webcam frame reaches JointCam and ends when the projected pixels can be sampled from the Windows desktop. Camera exposure, device buffering before delivery, physical monitor scanout, encoding and network delay are outside this measurement. Covered or undecodable samples are counted, and coverage below 90% produces an inconclusive result.
+
+Stage controls
+Open Stage controls… beside the preview. The Avatar tab includes framing, studio background, face-only mode, neutral lip overlay, sensitivity, recentering and manual webcam cutout placement. For a Kiyo Pro on the top center of your monitor, set Kiyo Pro downward tilt to the approximate angle below horizontal (15 degrees initially). Enable arms, look at the center of your screen with both shoulders visible, and click Calibrate camera position. This mount has a separate neutral calibration from earlier releases. JointCam saves your neutral face and shoulder angle for this webcam. Face-only mode suspends shoulder, arm, hand, prop interaction. Fixed facial placement uses the camera and configured coordinates even when a face detector cannot lock on.
+
+Open Avatar wardrobe beside the preview to choose frames, headwear and jewelry. Changes appear immediately and are saved.
+In Hands & props, choose Always present to arrange a full collection or Occasional flybys to catch one passing prop at a time. Pinch to catch, close your lips on a mouthpiece to hold, and open wide to drop. Two hands can break an item. A thrown item vanishes on impact and stays out of rotation until you change prop mode. Choose Off to clear the stage.
+
+In Stage controls > Audio & ash, select Windows default microphone or a named microphone for voice reactions. Choose Windows desktop audio or a named playback endpoint to react to speaker/headset audio instead. Watch Input level while speaking or playing sound. Audio sensitivity changes the loud-burst response. Brief irregular ash falls occur on their own. Sustained loud sound triggers a stronger shower and ember flare. Start with 100% audio sensitivity. In Avatar, Motion sensitivity ranges from 0% to 170%. Try 30% to reduce head and shoulder travel. Motion smoothing defaults to 65% and can be reduced for faster response. Lip movement remains independent. The microphone defaults to Off on launch. The camera also watches for a local exhaled plume near the mouth.
+
+Click a burst on the Effects & shortcuts tab, or assign a global shortcut and use the same combination on a Stream Deck Hotkey action. Use a letter, digit or F1–F24 with your preferred modifiers. Calibration defaults to Ctrl+Alt+C and can be reassigned on the same tab. Effect defaults are Ctrl+Alt+F9 for confetti, Ctrl+Alt+F10 for sparks and Ctrl+Alt+F11 for stars. If Windows reserves a combination, choose another.
+
+A flicked prop breaks apart on its first stage-edge impact with a flash slightly wider than the object, a small mushroom cloud and a short pop on Windows playback. To silence the pop, uncheck Play prop impact sound under Audio & ash. Gentle placements and mouth drops do not trigger it.
+
+In Audio & ash, Show mouth smoke controls exhaled smoke. The burning tip continues to smoke. Faster head movement can loosen ash. A sustained loud sound on the selected input sends sparks and ash from the ember.
+
+Turn a bong mouthpiece downward while pinching it to pour. Turn it upright to save the remaining water. A fresh bong starts full. Open Avatar wardrobe to try googly goggles, pixel shades, a propeller beanie, a traffic cone, a spinning bow tie or a pizza pendant.
+
+Hover over the preview FPS label to see long stage intervals and the number of identical 3D frames reused in the last reporting period. Changes to lip matte and manual face position take effect without reopening the webcam. A long interval exceeds 25 ms at 60 FPS or 50 ms at 30 FPS. Minimize JointCam while playing to skip the local preview redraw and keep sending to OBS. Use Measure OBS frame age to check delivery during a match.
+
+Uncheck Show live preview to stop drawing the local monitor while keeping the controls open. Camera tracking, effects, and OBS output continue. The switch is remembered between sessions.
+
+Ninja fight overlay
+Use the Karate controls to the left of the preview for the ninja fight, costume, and sounds. These switches are also in Stage controls > Hands & props. Enable Ninja fight overlay to play. Keep your shoulders and wrists in view and swipe through the masked ninjas before they reach you. The mode shows doodle arms automatically and pauses incoming attackers when both wrists leave view. The separate karate audio switch controls desktop playback. Capture JointCam application audio or desktop audio in OBS to include the sounds on stream.
+The separate Karate costume checkbox outfits each avatar with a red Japanese-flag headband, five-o’clock shadow, and a lit cigarette that follows the corner of the mouth. Choose the outfit and game independently. Enemies approach from either side, then leap into a kick, punch or sword attack. Scores and prompts stay off the stage.
+
+The Beaker Bong water reacts to starts, stops, turns and nods. Its waterline settles after you stop moving. The OpenGL renderer adds perspective and material-specific lighting to the bong, lighter and pipe.
+
+Layer switches take effect while the webcam stays open. Doodle arms, shoulder tracking, props and ninja fights share trackers as needed. Changing the camera device or its capture format still reopens the webcam.
+
+Hands and grabs
+Use Stage controls > Hands & props to adjust Arm stability and choose the full or lightweight hand model. Bring your open thumb and index finger to a prop, then pinch its visible outline. Open your fingers to release. For a second grip, pinch the other side with your other hand.
+
+Rendering measurements
+Open Stage controls > Performance and enable Measure rendering times. Keep Spout output running for sender timings. Toggle measurement off and back on to start a fresh comparison. For an in-match comparison, also record game frame times, OBS rendering misses and Measure OBS frame age.

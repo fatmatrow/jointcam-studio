@@ -1,4 +1,4 @@
-# JointCam Studio 1.1.0 - Windows runtime packages (CPython 3.12, win_amd64).
+# JointCam Studio 1.2.0 - Windows runtime packages (CPython 3.12, win_amd64).
 # Installed with: pip download --no-deps --only-binary=:all: --platform win_amd64
 #                 --python-version 3.12 --implementation cp --require-hashes -r requirements-windows.txt
 # jax, jaxlib, scipy, sentencepiece and sounddevice are MediaPipe dependencies that the

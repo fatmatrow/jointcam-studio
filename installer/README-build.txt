@@ -3,7 +3,7 @@ Building the JointCam Studio installer
 
     python installer/build_installer.py
 
-produces dist/JointCam-Studio-1.1.0-Setup.exe: one self-contained 64-bit setup file with the
+produces dist/JointCam-Studio-1.2.0-Setup.exe: one self-contained 64-bit setup file with the
 app, the official CPython 3.12.10 runtime (Python Software Foundation NuGet package), every
 Python package as a hash-pinned Windows wheel, and the native launcher.
 

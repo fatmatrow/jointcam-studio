@@ -35,84 +35,211 @@ POSE_WIDTH = 480
 HAND_WIDTH = 640
 
 
-def measure(rgb, landmarks, matte=False, sensor=None):
-    height,width = rgb.shape[:2]
-    pts=np.empty((max(FACE_POINTS)+1,2),np.float32)
-    for i in FACE_POINTS:
-        point=landmarks[i]
-        pts[i]=(point.x*width,point.y*height)
-    patch = np.empty(PATCH_SHAPE,np.uint8)
-    S = SCALE
-    for i,outline in enumerate(OUTLINES):
-        contour = pts[outline]
-        left,right = contour[0],pts[[133,263,291][i]]
-        axis = right-left
-        span = float(np.linalg.norm(axis))
-        if span<2:
-            return None
-        axis /= span
-        vertical = np.array([-axis[1],axis[0]])
-        height_px=span*.70
-        width_px = span*(1.12 if i==2 else 1.38)
-        center = (left+right)/2
-        if i==2:
-            projected=contour@vertical
-            low,high=projected.min(),projected.max()
-            height_px=max(span*.20,high-low)*1.12
-            center+=vertical*((high+low)*.5-center@vertical)
-        matrix = cv2.getAffineTransform(np.float32([center,center+axis*width_px/2,
-                                          center+vertical*height_px/2]),
-                                        np.float32([[48*S,32*S],[96*S,32*S],[48*S,64*S]]))
-        tile=patch[:,TILE_W*i:TILE_W*(i+1)]
-        if sensor is None:
-            rgb_tile=cv2.warpAffine(rgb,matrix,(TILE_W,TILE_H),flags=cv2.INTER_CUBIC,borderMode=cv2.BORDER_REPLICATE)
-            cv2.cvtColor(rgb_tile,cv2.COLOR_RGB2RGBA,dst=tile)
+class OneEuro:
+    """One Euro filter (Casiez, Roussel and Vogel, CHI 2012).
+
+    Smooths hard while a signal is still and follows it almost instantly while it moves,
+    which is what landmark jitter needs: steady tiles at rest, no lag on a real movement.
+    Works on scalars or numpy arrays. The speed term is divided by `scale` so `beta` is in
+    eye spans per second, independent of how large the face is in the frame.
+    """
+    def __init__(self, min_cutoff, beta, d_cutoff=1.0):
+        self.min_cutoff, self.beta, self.d_cutoff = min_cutoff, beta, d_cutoff
+        self.value = self.speed = None
+
+    @staticmethod
+    def _alpha(cutoff, dt):
+        return 1.0/(1.0+1.0/(2*math.pi*cutoff*dt))
+
+    def __call__(self, x, dt, scale=1.0):
+        x = np.asarray(x, dtype=np.float64)
+        if self.value is None or not 0 < dt < .25:
+            # First sample, or the face was away long enough that the old state is stale.
+            self.value, self.speed = x.copy(), np.zeros_like(x)
+            return x.copy()
+        raw = (x-self.value)/dt
+        self.speed = self.speed+self._alpha(self.d_cutoff, dt)*(raw-self.speed)
+        cutoff = self.min_cutoff+self.beta*np.abs(self.speed)/max(scale, 1e-6)
+        self.value = self.value+self._alpha(cutoff, dt)*(x-self.value)
+        return self.value.copy()
+
+
+def tile_sharpness(rgb_tile):
+    """Variance of the Laplacian: high for a crisp tile, low for motion blur or defocus."""
+    return float(cv2.Laplacian(cv2.cvtColor(np.ascontiguousarray(rgb_tile), cv2.COLOR_RGB2GRAY), cv2.CV_32F).var())
+
+
+def eye_openness(pts):
+    """Eye aspect ratio of the less open eye (Soukupova and Cech, 2016)."""
+    def ratio(a, b, c, d, e, f):
+        width = max(1., float(np.linalg.norm(pts[d]-pts[a])))
+        return float(np.linalg.norm(pts[b]-pts[f])+np.linalg.norm(pts[c]-pts[e]))/(2*width)
+    return min(ratio(33, 160, 158, 133, 153, 144), ratio(362, 385, 387, 263, 373, 380))
+
+
+class FaceMeasure:
+    """Turn face landmarks into the eye/eye/lip patch, the pose and the mouth opening.
+
+    1.2 keeps state between frames:
+      * Each tile's crop (centre, angle, size) is One Euro filtered, so the live eyes and
+        lips no longer wobble, zoom or rotate with landmark noise. The lip mask is drawn
+        from the current landmarks inside that steady crop, so it always matches the pixels.
+      * The lip tile grows instantly when the mouth opens and shrinks smoothly, so a fast
+        opening is never clipped at the tile edge.
+      * Mouth opening is measured against the eye span (steady) instead of the mouth width
+        (which changes with smiles and rounded vowels), relative to a learned closed-mouth
+        level, so the avatar's mouth closes fully when yours does.
+      * Every frame is graded for the held capture used when the face is lost: eyes count
+        as good when facing the camera, open and sharp; the mouth when facing the camera,
+        relaxed and sharp.
+    """
+    def __init__(self):
+        self.stamp = None
+        self.crops = [OneEuro(1.0, 6.0, d_cutoff=3.0) for _ in range(3)]
+        self.span = OneEuro(.8, 2.0)
+        self.opening = OneEuro(3.0, 1.5)
+        self.lip_height = None
+        self.baseline = None
+        self.yaw_ref = self.pitch_ref = self.ear_ref = None
+        self.sharp_ref = [None, None]
+
+    def _ema(self, ref, value, dt, tau=3.):
+        return value if ref is None else ref+(value-ref)*(1-math.exp(-min(dt, .25)/tau))
+
+    def __call__(self, rgb, landmarks, stamp, matte=False, sensor=None):
+        height, width = rgb.shape[:2]
+        pts = np.empty((max(FACE_POINTS)+1, 2), np.float32)
+        for i in FACE_POINTS:
+            point = landmarks[i]
+            pts[i] = (point.x*width, point.y*height)
+        dt = stamp-self.stamp if self.stamp is not None else 0.
+        self.stamp = stamp
+        l, r = pts[33], pts[263]
+        eye_span_raw = max(1., float(np.linalg.norm(r-l)))
+        eye_span = float(self.span(eye_span_raw, dt, scale=eye_span_raw))
+        patch = np.empty(PATCH_SHAPE, np.uint8)
+        S = SCALE
+        aspect = .5
+        sharp = []
+        for i, outline in enumerate(OUTLINES):
+            contour = pts[outline]
+            left, right = contour[0], pts[[133, 263, 291][i]]
+            axis = right-left
+            span = float(np.linalg.norm(axis))
+            if span < 2:
+                return None
+            unit = axis/span
+            vertical = np.array([-unit[1], unit[0]])
+            center = (left+right)/2
+            if i == 2:
+                projected = contour@vertical
+                center = center+vertical*((projected.max()+projected.min())*.5-center@vertical)
+            cx, cy, angle, span = self.crops[i]([center[0], center[1], math.atan2(unit[1], unit[0]), span], dt, scale=eye_span)
+            center = np.array([cx, cy], np.float32)
+            unit = np.array([math.cos(angle), math.sin(angle)], np.float32)
+            vertical = np.array([-unit[1], unit[0]], np.float32)
+            width_px = span*(1.12 if i == 2 else 1.38)
+            height_px = span*.70
+            # The filter may trail a fast head movement by a few pixels. Never let it trail
+            # the content: shift the crop just enough to keep every contour point inside it.
+            along = (contour-center)@unit
+            room = width_px*.5*(.90 if i == 2 else .80)
+            shift = max(0., float(along.max())-room)+min(0., float(along.min())+room)
+            if i < 2:
+                across = (contour-center)@vertical
+                vroom = height_px*.5*.80
+                vshift = max(0., float(across.max())-vroom)+min(0., float(across.min())+vroom)
+            else:
+                vshift = 0.
+            if shift or vshift:
+                center = center+unit*shift+vertical*vshift
+                self.crops[i].value[:2] = center
+            if i == 2:
+                # The current lips must fit the steady crop: size the tile around them.
+                offsets = (contour-center)@vertical
+                needed = max(span*.20, 2*float(np.abs(offsets).max()))*1.12
+                if self.lip_height is None or dt <= 0 or dt >= .25 or needed > self.lip_height:
+                    self.lip_height = needed
+                else:
+                    self.lip_height += (needed-self.lip_height)*(1-math.exp(-dt/.12))
+                height_px = min(max(self.lip_height, needed), width_px*.85)
+            matrix = cv2.getAffineTransform(np.float32([center, center+unit*width_px/2, center+vertical*height_px/2]),
+                                            np.float32([[48*S, 32*S], [96*S, 32*S], [48*S, 64*S]]))
+            tile = patch[:, TILE_W*i:TILE_W*(i+1)]
+            if sensor is None:
+                rgb_tile = cv2.warpAffine(rgb, matrix, (TILE_W, TILE_H), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+                cv2.cvtColor(rgb_tile, cv2.COLOR_RGB2RGBA, dst=tile)
+            else:
+                # Map each destination tile directly into the unmirrored sensor image.
+                # Resize uses pixel centers. Include the half-pixel offset in both axes.
+                inverse = cv2.invertAffineTransform(matrix)
+                sx, sy = sensor.shape[1]/width, sensor.shape[0]/height
+                inverse[0] *= -sx
+                inverse[0, 2] += sensor.shape[1]-.5-.5*sx
+                inverse[1] *= sy
+                inverse[1, 2] += .5*sy-.5
+                bgr = cv2.warpAffine(sensor, inverse, (TILE_W, TILE_H), flags=cv2.INTER_CUBIC | cv2.WARP_INVERSE_MAP,
+                                     borderMode=cv2.BORDER_REPLICATE)
+                cv2.cvtColor(bgr, cv2.COLOR_BGR2RGBA, dst=tile)
+                rgb_tile = tile[:, :, :3]
+            sharp.append(tile_sharpness(rgb_tile))
+            if i == 2:
+                lip = cv2.transform(contour[None], matrix)[0]
+                mask = np.zeros((TILE_H, TILE_W), np.uint8)
+                cv2.fillPoly(mask, [np.int32(np.round(lip*16))], 255, lineType=cv2.LINE_AA, shift=4)
+                if matte:
+                    inside = cv2.transform(pts[[78, 81, 13, 311, 308, 402, 14, 178]][None], matrix)[0]
+                    tissue = mask.copy()
+                    cv2.fillPoly(tissue, [np.int32(np.round(inside*16))], 0, lineType=cv2.LINE_AA, shift=4)
+                    selected = tissue > 180
+                    if np.any(selected):
+                        pixels = rgb_tile[selected]
+                        # Every other lip pixel gives the same median tone at half the sort cost.
+                        tone = np.median(pixels[::2] if len(pixels) > 512 else pixels, axis=0).astype(np.float32)
+                        level = cv2.GaussianBlur(tissue, (6*S+1, 6*S+1), 2*S).astype(np.float32)*(.16/255)+.86
+                        tint = level[:, :, None]*(tone*.91+tone.mean()*.09)
+                        blended = cv2.addWeighted(rgb_tile.astype(np.float32), .30, tint, .70, 0)
+                        np.copyto(tile[:, :, :3], np.clip(blended, 0, 255).astype(np.uint8), where=selected[:, :, None])
+                tile[:, :, 3] = cv2.GaussianBlur(mask, (2*S+1, 2*S+1), .65*S)
+                aspect = float(np.clip(height_px/width_px, .16, .85))
+        mid = (l+r)*.5
+        yaw = float(np.clip((pts[1, 0]-mid[0])/eye_span_raw*2, -.9, .9))
+        pitch = float(np.clip(((pts[1, 1]-mid[1])/eye_span_raw-.46)*1.25, -.5, .5))
+        roll = -math.atan2(r[1]-l[1], r[0]-l[0])
+        # Inner-lip aperture across the mouth, measured perpendicular to the mouth line.
+        mouth_axis = pts[291]-pts[61]
+        normal = np.array([-mouth_axis[1], mouth_axis[0]])/max(1., float(np.linalg.norm(mouth_axis)))
+        gaps = [abs(float((pts[b]-pts[a])@normal)) for a, b in [(81, 178), (13, 14), (311, 402)]]
+        aperture = (gaps[1]*.6+min(gaps[0], gaps[2])*.4)/eye_span
+        # Closed-mouth level: follows the smallest recent aperture and drifts up slowly, so a
+        # person whose lips never quite meet in the landmarks still reads as closed.
+        # It starts at a typical closed level so a session that begins mid-sentence still
+        # reads open, and it can never learn a wide-open mouth as closed.
+        if self.baseline is None:
+            self.baseline = min(aperture, .03)
         else:
-            # Map each destination tile directly into the unmirrored sensor image.
-            # Resize uses pixel centers. Include the half-pixel offset in both axes.
-            inverse=cv2.invertAffineTransform(matrix)
-            sx,sy=sensor.shape[1]/width,sensor.shape[0]/height
-            inverse[0]*=-sx
-            inverse[0,2]+=sensor.shape[1]-.5-.5*sx
-            inverse[1]*=sy
-            inverse[1,2]+=.5*sy-.5
-            bgr=cv2.warpAffine(sensor,inverse,(TILE_W,TILE_H),flags=cv2.INTER_CUBIC|cv2.WARP_INVERSE_MAP,
-                               borderMode=cv2.BORDER_REPLICATE)
-            cv2.cvtColor(bgr,cv2.COLOR_BGR2RGBA,dst=tile)
-            rgb_tile=tile[:,:,:3]
-        if i==2:
-            lip=cv2.transform(contour[None],matrix)[0]
-            mask=np.zeros((TILE_H,TILE_W),np.uint8)
-            cv2.fillPoly(mask,[np.int32(np.round(lip*16))],255,lineType=cv2.LINE_AA,shift=4)
-            if matte:
-                inside=cv2.transform(pts[[78,81,13,311,308,402,14,178]][None],matrix)[0]
-                tissue=mask.copy()
-                cv2.fillPoly(tissue,[np.int32(np.round(inside*16))],0,lineType=cv2.LINE_AA,shift=4)
-                selected=tissue>180
-                if np.any(selected):
-                    pixels=rgb_tile[selected]
-                    # Every other lip pixel gives the same median tone at half the sort cost.
-                    tone=np.median(pixels[::2] if len(pixels)>512 else pixels,axis=0).astype(np.float32)
-                    level=cv2.GaussianBlur(tissue,(6*S+1,6*S+1),2*S).astype(np.float32)*(.16/255)+.86
-                    tint=level[:,:,None]*(tone*.91+tone.mean()*.09)
-                    blended=cv2.addWeighted(rgb_tile.astype(np.float32),.30,tint,.70,0)
-                    np.copyto(tile[:,:,:3],np.clip(blended,0,255).astype(np.uint8),where=selected[:,:,None])
-            tile[:,:,3]=cv2.GaussianBlur(mask,(2*S+1,2*S+1),.65*S)
-            aspect=float(np.clip(height_px/width_px,.16,.85))
-    l,r=pts[33],pts[263]
-    mid=(l+r)*.5
-    eye_span=max(1.,float(np.linalg.norm(r-l)))
-    yaw=float(np.clip((pts[1,0]-mid[0])/eye_span*2,-.9,.9))
-    pitch=float(np.clip(((pts[1,1]-mid[1])/eye_span-.46)*1.25,-.5,.5))
-    roll=-math.atan2(r[1]-l[1],r[0]-l[0])
-    mouth_axis=pts[291]-pts[61]
-    width_px=max(1.,float(np.linalg.norm(mouth_axis)))
-    normal=np.array([-mouth_axis[1],mouth_axis[0]])/width_px
-    gaps=[abs(float((pts[b]-pts[a])@normal)) for a,b in [(81,178),(13,14),(311,402)]]
-    aperture=(gaps[1]*.6+min(gaps[0],gaps[2])*.4)/width_px
-    opening=float(np.clip((aperture-.015)*2.35,0,1))
-    return {"pose":(float((mid[0]/width-.5)*1.9),float((.43-mid[1]/height)*1.3),yaw,roll,pitch,opening,aspect),
-            "patch":patch}
+            self.baseline = min(aperture, self.baseline+max(0., dt)*.01, .05)
+        opening = float(np.clip(self.opening(np.clip((aperture-self.baseline-.008)/.24, 0, 1), dt), 0, 1))
+        # Grade this frame for the held capture, against this person's own typical pose,
+        # eye openness and tile sharpness.
+        ear = eye_openness(pts)
+        eye_sharp = (sharp[0]+sharp[1])*.5
+        frontal = (self.yaw_ref is not None and abs(yaw-self.yaw_ref) < .25 and abs(pitch-self.pitch_ref) < .20)
+        good_eyes = bool(frontal and self.ear_ref is not None and ear > .75*self.ear_ref
+                         and eye_sharp > .5*self.sharp_ref[0])
+        good_mouth = bool(frontal and opening < .25 and self.sharp_ref[1] is not None and sharp[2] > .5*self.sharp_ref[1])
+        self.yaw_ref = self._ema(self.yaw_ref, yaw, dt)
+        self.pitch_ref = self._ema(self.pitch_ref, pitch, dt)
+        if self.ear_ref is None or ear > .7*self.ear_ref:  # blinks do not lower the open-eye level
+            self.ear_ref = self._ema(self.ear_ref, ear, dt)
+        self.sharp_ref = [self._ema(self.sharp_ref[0], eye_sharp, dt), self._ema(self.sharp_ref[1], sharp[2], dt)]
+        return {"pose": (float((mid[0]/width-.5)*1.9), float((.43-mid[1]/height)*1.3), yaw, roll, pitch, opening, aspect),
+                "patch": patch, "good": (good_eyes, good_mouth)}
+
+
+def measure(rgb, landmarks, matte=False, sensor=None):
+    """Single-frame measurement without temporal filtering (tools and tests)."""
+    return FaceMeasure()(rgb, landmarks, 0., matte, sensor)
 
 
 class Mirror:
@@ -358,6 +485,7 @@ def face_loop(shared, stop, cfg, rig):
     cv2.ellipse(lip_mask, (48*S, 32*S), (42*S, 23*S), 0, 0, 360, 255, -1, cv2.LINE_AA)
     frames = Frames(shared, stop, cfg)
     mirror = Mirror(FACE_WIDTH)
+    measurer = FaceMeasure()
     try:
         while not stop.is_set():
             frame = frames.next()
@@ -399,7 +527,7 @@ def face_loop(shared, stop, cfg, rig):
                     result = face.process(rgb)
                     landmarks = result.multi_face_landmarks[0].landmark if result.multi_face_landmarks else None
                 # Tiles come from the full-resolution frame for every camera.
-                data = measure(rgb, landmarks, live.get("matte", cfg.get("matte", False)), raw) if landmarks else None
+                data = measurer(rgb, landmarks, stamp, live.get("matte", cfg.get("matte", False)), raw) if landmarks else None
                 if landmarks:
                     mouth = {"x": (landmarks[13].x+landmarks[14].x)/2, "y": (landmarks[13].y+landmarks[14].y)/2,
                              "span": abs(landmarks[33].x-landmarks[263].x)}

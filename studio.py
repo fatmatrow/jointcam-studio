@@ -79,7 +79,7 @@ class Studio(QMainWindow):
     benchmark_done=Signal(object,str)
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("JointCam Studio • 1.1.0")
+        self.setWindowTitle("JointCam Studio • 1.2.0")
         self.resize(1100,635)
         self.settings=QSettings("JointCam","Standalone Studio")
         self.fps = 60 if str(self.settings.value("video/fps",30))=="60" else 30
@@ -431,7 +431,7 @@ class Studio(QMainWindow):
                     self.backend.blockSignals(previous)
                 from software import SoftwareRenderer
                 self.render=SoftwareRenderer(*dimensions(self.output_mode))
-                self.setWindowTitle("JointCam Studio 1.1.0 • Compatibility renderer")
+                self.setWindowTitle("JointCam Studio 1.2.0 • Compatibility renderer")
             self.set_live_preview(self.preview_switch.isChecked())
             self.deadline=time.monotonic()
             self.timer.start(0)
@@ -609,7 +609,8 @@ class Studio(QMainWindow):
             elif self.side_samples:self.camera_angle=median(self.side_samples)
             self.settings.setValue(self.profile_key(),json.dumps(self.neutral+[self.camera_angle]))
             self.pending_center=False
-            self.motion=Motion()
+            # Recalibrating keeps the held capture of this person's eyes and mouth.
+            self.motion=Motion(held=self.motion.held)
             self.ash_pose=None
             self.calibration_message("Calibrated face and arm reach for this webcam." if self.side_samples else
                 "Face center saved. Enable arms and show both shoulders to calibrate reach.")
@@ -724,7 +725,6 @@ class Studio(QMainWindow):
     def frame(self):
         try:
             face,body,state,camera_stamp,rig=self.cam.sample()
-            if self.camera_state.text()!=state:self.camera_state.setText(state)
             now=time.monotonic()
             if self.options.received.isVisible() and now>=self.next_camera_info:
                 self.next_camera_info=now+.25
@@ -754,6 +754,8 @@ class Studio(QMainWindow):
                 face=dict(face,pose=pose)
             body=tuple((b-neutral[i+5])*gain for i,b in enumerate(body)) if self.torso.isChecked() and not cfg["faceOnly"] else (0.,0.)
             face,body=self.motion.sample(now,camera_stamp,face,body,cfg["smoothing"])
+            if self.motion.holding:state+=" · showing your last good capture"
+            if self.camera_state.text()!=state:self.camera_state.setText(state)
             pose=face["pose"]
             r.zoom=self.zoom.value()/100*(1.525 if cfg["closeup"] else 1.)
             r.pan=(self.pan[0],self.pan[1]+(.16 if cfg["closeup"] else 0))

@@ -31,7 +31,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 PYTHON_VERSION = "3.12.10"
 PYTHON_URL = f"https://api.nuget.org/v3-flatcontainer/python/{PYTHON_VERSION}/python.{PYTHON_VERSION}.nupkg"
 PYTHON_SHA256 = "0eb85c2dfccccf1b17352de4c397f69194035b7d37149eacc16f1147d93de3b8"

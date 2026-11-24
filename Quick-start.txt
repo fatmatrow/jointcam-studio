@@ -1,11 +1,16 @@
-JointCam Studio — Standalone 1.1.0 for Windows x64
+JointCam Studio — Standalone 1.2.0 for Windows x64
 
 Installing
-Run JointCam-Studio-1.1.0-Setup.exe. It installs for your Windows account only, with no administrator prompt, into %LOCALAPPDATA%\Programs\JointCam Studio Standalone, and adds JointCam Studio to the Start menu (and optionally the desktop). Everything it needs is inside: no Python, Qt or Visual C++ download is required. Windows 10 (1809 or later) or Windows 11, 64-bit.
+Run JointCam-Studio-1.2.0-Setup.exe. It installs for your Windows account only, with no administrator prompt, into %LOCALAPPDATA%\Programs\JointCam Studio Standalone, and adds JointCam Studio to the Start menu (and optionally the desktop). Everything it needs is inside: no Python, Qt or Visual C++ download is required. Windows 10 (1809 or later) or Windows 11, 64-bit.
 Because the setup file is not code-signed, Windows SmartScreen may show "Windows protected your PC". Click More info, then Run anyway.
 It installs separately from any earlier JointCam Studio, which you can keep or remove. Both share the same saved settings.
 To update, run a newer setup over the top. To remove it, use Settings > Apps > Installed apps > JointCam Studio > Uninstall. Your settings are kept in case you reinstall.
 For NVIDIA RTX face tracking, install NVIDIA's AR SDK runtime for your GPU. Without it JointCam uses its built-in CPU face tracker automatically.
+
+What's new in 1.2.0
+Steadier mouth and eyes. The live eye and lip tiles no longer wobble, zoom or rotate with tracking noise: each tile's framing is smoothed while you hold still and follows instantly when you move, and it always keeps your lips fully inside the tile. The lip outline still comes from the current frame, so it matches your mouth exactly.
+More accurate mouth opening. Opening is now measured against the distance between your eyes, which stays the same when you smile or round your lips, instead of against your mouth width. JointCam learns your own closed-mouth position, so the avatar's mouth closes completely when yours does, and small flickers while your mouth is still are filtered out.
+Holds your face when the camera loses it. While your face is visible, JointCam keeps a running copy of your eyes from the latest sharp, front-facing frame with your eyes open, and of your mouth from the latest sharp, front-facing frame with your mouth relaxed. If the camera loses your face (you turn away, leave the frame, or a hand covers it), the avatar keeps showing that capture instead of switching to the cartoon face. The head holds its position for half a second, then eases back to centre. The camera status line reads "showing your last good capture" while this is active. Live tracking resumes the moment your face is back. Recalibrating keeps the capture; choosing another camera starts fresh.
 
 What's new in 1.1.0
 Rendering quality. Open Stage controls > Performance and choose Rendering quality. Efficient uses 4× multisampling. High uses 8× multisampling. Cinema (the default) adds 1.5× supersampling: the stage renders above the output resolution and a Lanczos filter brings it down, which removes shimmer from the ash, paper grain, glasses and overlay edges. Ultra uses 2× supersampling. High, Cinema and Ultra add a warm glow around The Joint's burning ember when the output is transparent (Spout2 or Unity Capture) or uses the studio backdrop. The green OBS Virtual Camera feed never gets glow, so chroma keying stays clean, and glow pauses during an OBS frame-age measurement. Cinema is light work for an RTX 4070. If a game is GPU-bound while you stream, step down to High.
